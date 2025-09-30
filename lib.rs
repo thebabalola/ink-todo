@@ -1,160 +1,136 @@
 #![cfg_attr(not(feature = "std"), no_std, no_main)]
 
-use ink::prelude::vec::Vec;
-use ink::storage::Mapping;
-
 #[ink::contract]
-mod todo_contract {
+mod todo {
+    use ink::prelude::string::String;
+    use ink::prelude::vec::Vec;
 
-    use super::*;
-
-    /// A simple Todo item
-    #[derive(scale::Decode, scale::Encode, Clone, PartialEq, Debug)]
-    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    #[derive(ink::storage::traits::StorageLayout)]
-    pub struct Todo {
+    #[derive(Debug, Clone, scale::Encode, scale::Decode)]
+    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo, ink::storage::traits::StorageLayout))]
+    pub struct Task {
         pub id: u32,
-        pub title: String,
         pub description: String,
         pub completed: bool,
     }
 
-    /// Events emitted by the contract
     #[ink(event)]
-    pub struct TodoCreated {
+    pub struct TaskCreated {
         #[ink(topic)]
         pub id: u32,
         #[ink(topic)]
-        pub title: String,
+        pub description: String,
     }
 
     #[ink(event)]
-    pub struct TodoUpdated {
-        #[ink(topic)]
-        pub id: u32,
-        #[ink(topic)]
-        pub completed: bool,
-    }
-
-    #[ink(event)]
-    pub struct TodoDeleted {
+    pub struct TaskCompleted {
         #[ink(topic)]
         pub id: u32,
     }
 
-    /// Defines the storage of your contract.
+    #[ink(event)]
+    pub struct TaskRemoved {
+        #[ink(topic)]
+        pub id: u32,
+    }
+
+    #[ink(event)]
+    pub struct TaskUpdated {
+        #[ink(topic)]
+        pub id: u32,
+        #[ink(topic)]
+        pub description: String,
+    }
+
     #[ink(storage)]
-    pub struct TodoContract {
-        /// Mapping from todo ID to Todo item
-        todos: Mapping<u32, Todo>,
-        /// Counter for generating unique todo IDs
+    pub struct Todo {
+        tasks: Vec<Task>,
         next_id: u32,
     }
 
-    impl TodoContract {
-        /// Constructor that initializes the contract
+    impl Default for Todo {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl Todo {
         #[ink(constructor)]
         pub fn new() -> Self {
             Self {
-                todos: Mapping::new(),
-                next_id: 1,
+                tasks: Vec::new(),
+                next_id: 0,
             }
         }
 
-        /// Default constructor
-        #[ink(constructor)]
-        pub fn default() -> Self {
-            Self::new()
-        }
-
-        /// Create a new todo item
         #[ink(message)]
-        pub fn create_todo(&mut self, title: String, description: String) -> u32 {
+        pub fn add_task(&mut self, description: String) -> u32 {
             let id = self.next_id;
-            let todo = Todo {
+            let task = Task {
                 id,
-                title: title.clone(),
-                description,
+                description: description.clone(),
                 completed: false,
             };
+            self.tasks.push(task);
+            self.next_id = self.next_id.saturating_add(1);
             
-            self.todos.insert(id, &todo);
-            self.next_id += 1;
-
-            self.env().emit_event(TodoCreated { id, title });
+            self.env().emit_event(TaskCreated {
+                id,
+                description,
+            });
+            
             id
         }
 
-        /// Get a todo item by ID
         #[ink(message)]
-        pub fn get_todo(&self, id: u32) -> Option<Todo> {
-            self.todos.get(id)
-        }
-
-        /// Get all todo items
-        #[ink(message)]
-        pub fn get_all_todos(&self) -> Vec<Todo> {
-            let mut all_todos = Vec::new();
-            for i in 1..self.next_id {
-                if let Some(todo) = self.todos.get(i) {
-                    all_todos.push(todo);
-                }
-            }
-            all_todos
-        }
-
-        /// Update a todo item
-        #[ink(message)]
-        pub fn update_todo(&mut self, id: u32, title: Option<String>, description: Option<String>) -> bool {
-            if let Some(mut todo) = self.todos.get(id) {
-                if let Some(new_title) = title {
-                    todo.title = new_title;
-                }
-                if let Some(new_description) = description {
-                    todo.description = new_description;
-                }
+        pub fn complete_task(&mut self, id: u32) -> bool {
+            if let Some(task) = self.tasks.iter_mut().find(|t| t.id == id) {
+                task.completed = true;
                 
-                self.todos.insert(id, &todo);
+                self.env().emit_event(TaskCompleted { id });
                 true
             } else {
                 false
             }
         }
 
-        /// Toggle todo completion status
         #[ink(message)]
-        pub fn toggle_todo(&mut self, id: u32) -> bool {
-            if let Some(mut todo) = self.todos.get(id) {
-                todo.completed = !todo.completed;
-                self.todos.insert(id, &todo);
+        pub fn remove_task(&mut self, id: u32) -> bool {
+            if let Some(pos) = self.tasks.iter().position(|t| t.id == id) {
+                self.tasks.remove(pos);
                 
-                self.env().emit_event(TodoUpdated { 
-                    id, 
-                    completed: todo.completed 
+                self.env().emit_event(TaskRemoved { id });
+                true
+            } else {
+                false
+            }
+        }
+
+        #[ink(message)]
+        pub fn get_tasks(&self) -> Vec<Task> {
+            self.tasks.clone()
+        }
+
+        #[ink(message)]
+        pub fn get_task(&self, id: u32) -> Option<Task> {
+            self.tasks
+                .iter()
+                .find(|t| t.id == id)
+                .cloned()
+        }
+
+        #[ink(message)]
+        pub fn update_task(&mut self, id: u32, description: String) -> bool {
+            if let Some(task) = self.tasks.iter_mut().find(|t| t.id == id) {
+                task.description = description.clone();
+                
+                self.env().emit_event(TaskUpdated {
+                    id,
+                    description,
                 });
                 true
             } else {
                 false
             }
         }
-
-        /// Delete a todo item
-        #[ink(message)]
-        pub fn delete_todo(&mut self, id: u32) -> bool {
-            if self.todos.get(id).is_some() {
-                self.todos.remove(id);
-                self.env().emit_event(TodoDeleted { id });
-                true
-            } else {
-                false
-            }
-        }
-
-        /// Get the total number of todos
-        #[ink(message)]
-        pub fn get_todo_count(&self) -> u32 {
-            self.next_id - 1
-        }
     }
-
 }
