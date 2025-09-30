@@ -11,6 +11,7 @@ mod todo_contract {
     /// A simple Todo item
     #[derive(scale::Decode, scale::Encode, Clone, PartialEq, Debug)]
     #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+    #[derive(ink::storage::traits::StorageLayout)]
     pub struct Todo {
         pub id: u32,
         pub title: String,
